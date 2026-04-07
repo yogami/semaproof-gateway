@@ -36,7 +36,9 @@ def write_audit_log(entry: dict):
     with open(AUDIT_LOG_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
-def evaluate_in_enclave(payload_str: str) -> dict:
+from e2b import AsyncSandbox
+
+async def evaluate_in_enclave(payload_str: str) -> dict:
     """
     Provisions a Nitro/SEV-SNP microVM to evaluate the payload deterministically.
     This protects the validation logic from host and supply-chain compromises.
@@ -44,7 +46,7 @@ def evaluate_in_enclave(payload_str: str) -> dict:
     sandbox = None
     try:
         if E2B_API_KEY:
-            sandbox = Sandbox.create()
+            sandbox = await AsyncSandbox.create()
             
             # For MVP: We inject a strict python validation script into the sandbox and run it.
             safe_payload = payload_str.replace("'", "\\'")
@@ -60,9 +62,9 @@ for word in forbidden:
         
 print("APPROVED")
 """
-            sandbox.files.write("/validate.py", validation_script)
-            process = sandbox.process.start("python3 /validate.py")
-            process.wait()
+            await sandbox.files.write("/validate.py", validation_script)
+            process = await sandbox.process.start("python3 /validate.py")
+            await process.wait()
             
             if process.exit_code != 0:
                 return {"allowed": False, "reason": process.stdout.strip() or process.stderr.strip()}
@@ -79,7 +81,7 @@ print("APPROVED")
         return {"allowed": False, "reason": f"Enclave Instantiation Error: {str(e)}"}
     finally:
         if sandbox:
-            sandbox.kill()
+            await sandbox.kill()
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def gateway_proxy(request: Request, path: str):
@@ -95,7 +97,7 @@ async def gateway_proxy(request: Request, path: str):
     timestamp = datetime.utcnow().isoformat() + "Z"
     
     # 2. Hard-validate intent using the hardware enclave
-    evaluation = evaluate_in_enclave(body_str)
+    evaluation = await evaluate_in_enclave(body_str)
     
     if not evaluation["allowed"]:
         log_entry = {

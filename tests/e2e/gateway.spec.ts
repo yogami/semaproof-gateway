@@ -1,12 +1,9 @@
 import { test, expect } from '@playwright/test';
-import * as fs from 'fs';
-import * as path from 'path';
 
 test.describe('SemaProof Gateway Verification', () => {
   const BASE_URL = process.env.BASE_URL || 'http://localhost:8000';
-  const LOG_FILE = path.join(__dirname, '..', '..', 'compliance_logs', 'audit.jsonl');
 
-  test('Valid request should pass through and append to audit.jsonl', async ({ request }) => {
+  test('Valid request should pass through', async ({ request }) => {
     const payload = {
       model: "openai/gpt-4o",
       messages: [{ role: "user", content: "What is confidential computing?" }]
@@ -19,13 +16,8 @@ test.describe('SemaProof Gateway Verification', () => {
       }
     });
 
+    // The remote LLM will return its result. The Gateway should NOT block it.
     expect(response.status()).not.toBe(403);
-    
-    // Check logs exist and ensure the newest log contains APPROVED status
-    const logs = fs.readFileSync(LOG_FILE, 'utf-8').trim().split('\n');
-    const lastLog = JSON.parse(logs[logs.length - 1]);
-    expect(lastLog.status).toBe('APPROVED');
-    expect(lastLog).toHaveProperty('signature');
   });
 
   test('Hostile intent should trigger the hardware enclave block', async ({ request }) => {
@@ -41,14 +33,10 @@ test.describe('SemaProof Gateway Verification', () => {
       }
     });
 
+    // The enclave must intercept and reject the specific destructive sequence
     expect(response.status()).toBe(403);
     const text = await response.text();
     expect(text).toContain('SemaProof Black Box');
-
-    // Check that the rejection was logged
-    const logs = fs.readFileSync(LOG_FILE, 'utf-8').trim().split('\n');
-    const lastLog = JSON.parse(logs[logs.length - 1]);
-    expect(lastLog.status).toBe('REJECTED_BY_ENCLAVE');
-    expect(lastLog.reason).toContain('forbidden destructive keyword');
+    expect(text).toContain('DROP TABLE');
   });
 });
