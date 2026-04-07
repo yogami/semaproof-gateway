@@ -47,9 +47,10 @@ def evaluate_in_enclave(payload_str: str) -> dict:
             sandbox = Sandbox.create()
             
             # For MVP: We inject a strict python validation script into the sandbox and run it.
+            safe_payload = payload_str.replace("'", "\\'")
             validation_script = f"""
 import sys
-payload = '''{payload_str.replace("'", "\\'")}'''
+payload = '''{safe_payload}'''
 forbidden = {FORBIDDEN_KEYWORDS}
 
 for word in forbidden:

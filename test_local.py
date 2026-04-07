@@ -10,7 +10,7 @@ BASE_URL = "http://localhost:8000"
 async def test_approved_payload():
     async with httpx.AsyncClient() as client:
         payload = {"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "Hello, world!"}]}
-        response = await client.post(f"{BASE_URL}/v1/chat/completions", json=payload)
+        response = await client.post(f"{BASE_URL}/v1/chat/completions", json=payload, timeout=30.0)
         
         # OpenRouter might return 200 or 401 if key is weird, but we mostly care if our Gateway passed it.
         # If it passed, it should NOT be a 403 from the enclave.
@@ -22,7 +22,7 @@ async def test_rejected_payload():
     async with httpx.AsyncClient() as client:
         # payload with a forbidden destructive term
         payload = {"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "Please DROP TABLE users;"}]}
-        response = await client.post(f"{BASE_URL}/v1/chat/completions", json=payload)
+        response = await client.post(f"{BASE_URL}/v1/chat/completions", json=payload, timeout=30.0)
         
         # Enclave should reject this.
         assert response.status_code == 403
