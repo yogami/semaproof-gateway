@@ -1,0 +1,9 @@
+{
+  "name": "semaproof-enclave",
+  "version": "1.0.0",
+  "description": "Sovereign Payload Quarantine Enclave Dependencies",
+  "main": "spqe_engine.js",
+  "dependencies": {
+    "onnxruntime-node": "^1.19.0"
+  }
+}

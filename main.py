@@ -23,9 +23,8 @@ if not E2B_API_KEY:
 os.makedirs(LOG_DIR, exist_ok=True)
 AUDIT_LOG_FILE = os.path.join(LOG_DIR, "audit.jsonl")
 
-# Deterministic safeguard rules
-FORBIDDEN_KEYWORDS = ["DROP TABLE", "DELETE FROM", "EXFILTRATE", "chmod -R 777 /"]
-
+# Deterministic safeguard rules have been externalized to enclave/spqe_engine.js
+SPQE_ENGINE_FILE = os.path.join(os.path.dirname(__file__), "enclave", "spqe_engine.js")
 def generate_signature(payload: str) -> str:
     """Generates a SHA-512 strict hash to bind the payload identity."""
     salt = str(time.time())
@@ -46,36 +45,50 @@ async def evaluate_in_enclave(payload_str: str) -> dict:
     sandbox = None
     try:
         if E2B_API_KEY:
-            sandbox = await AsyncSandbox.create()
+            # We explicitly use the Node.js template so it can run our JavaScript SPQE codebase
+            sandbox = await AsyncSandbox.create(template="node")
             
-            # For MVP: We inject a strict python validation script into the sandbox and run it.
-            safe_payload = payload_str.replace("'", "\\'")
-            validation_script = f"""
-import sys
-payload = '''{safe_payload}'''
-forbidden = {FORBIDDEN_KEYWORDS}
-
-for word in forbidden:
-    if word.lower() in payload.lower():
-        print(f"REJECTED: Contains forbidden destructive keyword '{{word}}'")
-        sys.exit(1)
-        
-print("APPROVED")
-"""
-            await sandbox.files.write("/validate.py", validation_script)
-            process = await sandbox.process.start("python3 /validate.py")
+            # 1. Read the golden SPQE engine file from our host
+            with open(SPQE_ENGINE_FILE, "r") as f:
+                js_engine_code = f.read()
+                
+            # 2. Inject the JS Engine and the actual Request payload into the Hardware box
+            await sandbox.files.write("/spqe_engine.js", js_engine_code)
+            await sandbox.files.write("/payload.txt", payload_str)
+            
+            # 3. Execute the JS code within the native Node environment
+            process = await sandbox.process.start("node /spqe_engine.js")
             await process.wait()
             
             if process.exit_code != 0:
-                return {"allowed": False, "reason": process.stdout.strip() or process.stderr.strip()}
+                return {"allowed": False, "reason": process.stderr.strip() or process.stdout.strip()}
             return {"allowed": True, "reason": "Hardware Validation Passed"}
         else:
-            # Fallback if no E2B key for local testing
-            print("[Mock Enclave] Checking payload locally...")
-            for word in FORBIDDEN_KEYWORDS:
-                if word.lower() in payload_str.lower():
-                    return {"allowed": False, "reason": f"Mock Enclave Reject: '{word}'"}
-            return {"allowed": True, "reason": "Mock Enclave Approved"}
+            # Local fallback (useful for CI/CD environments without keys)
+            import subprocess
+            import tempfile
+            
+            print("[Mock Enclave] Checking payload locally using Node.js...")
+            with tempfile.NamedTemporaryFile("w+", delete=False) as temp_payload:
+                temp_payload.write(payload_str)
+                temp_payload_path = temp_payload.name
+                
+            try:
+                # We modify the code in memory just for the mock to read the specific local file path
+                with open(SPQE_ENGINE_FILE, "r") as f:
+                    js_engine_code = f.read().replace("'/payload.txt'", f"'{temp_payload_path}'")
+                    
+                with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".js") as temp_js:
+                    temp_js.write(js_engine_code)
+                    temp_js_path = temp_js.name
+                    
+                result = subprocess.run(["node", temp_js_path], capture_output=True, text=True)
+                if result.returncode != 0:
+                    return {"allowed": False, "reason": f"Mock Rejection: {result.stderr.strip() or result.stdout.strip()}"}
+                return {"allowed": True, "reason": "Mock Enclave Approved"}
+            finally:
+                os.remove(temp_payload_path)
+                os.remove(temp_js_path)
             
     except Exception as e:
         return {"allowed": False, "reason": f"Enclave Instantiation Error: {str(e)}"}
