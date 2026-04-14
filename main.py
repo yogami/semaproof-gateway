@@ -46,7 +46,7 @@ async def evaluate_in_enclave(payload_str: str) -> dict:
     try:
         if E2B_API_KEY:
             # We explicitly use the Node.js template so it can run our JavaScript SPQE codebase
-            sandbox = AsyncSandbox(template="node")
+            sandbox = await AsyncSandbox.create("base")
             
             # 1. Read the golden SPQE engine file from our host
             with open(SPQE_ENGINE_FILE, "r") as f:
@@ -57,8 +57,7 @@ async def evaluate_in_enclave(payload_str: str) -> dict:
             await sandbox.files.write("/payload.txt", payload_str)
             
             # 3. Execute the JS code within the native Node environment
-            process = await sandbox.process.start("node /spqe_engine.js")
-            await process.wait()
+            process = await sandbox.commands.run("node /spqe_engine.js")
             
             if process.exit_code != 0:
                 return {"allowed": False, "reason": process.stderr.strip() or process.stdout.strip()}
