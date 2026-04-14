@@ -46,7 +46,7 @@ async def evaluate_in_enclave(payload_str: str) -> dict:
     try:
         if E2B_API_KEY:
             # We explicitly use the Node.js template so it can run our JavaScript SPQE codebase
-            sandbox = await AsyncSandbox.create(template="node")
+            sandbox = AsyncSandbox(template="node")
             
             # 1. Read the golden SPQE engine file from our host
             with open(SPQE_ENGINE_FILE, "r") as f:
@@ -141,6 +141,8 @@ async def gateway_proxy(request: Request, path: str):
         headers = dict(request.headers)
         headers.pop("host", None) 
         headers["x-semaproof-poe"] = signature # Inject our PoE hash
+        headers["HTTP-Referer"] = "https://github.com/yogami/semaproof-gateway"
+        headers["X-Title"] = "SemaProof Gateway"
         
         try:
             upstream_response = await client.request(
